@@ -11,6 +11,26 @@ from reportlab.pdfgen import canvas
 from PyPDF2 import PdfReader as PyPdfReader, PdfWriter as PyPdfWriter
 import io
 
+SHEET_NAME = "cosmoslim patient record"
+
+def setup_google_sheets():
+    """Connect to Google Sheets using credentials from Render env vars"""
+    try:
+        creds_json = os.getenv("GOOGLE_CREDENTIALS")
+        if not creds_json:
+            st.warning("⚠️ Google credentials not found in environment variables.")
+            return None
+
+        creds = json.loads(creds_json)
+        client = gspread.service_account_from_dict(creds)
+
+        sheet = client.open(SHEET_NAME).sheet1
+        st.success(f"✅ Connected to Google Sheet: {SHEET_NAME}")
+        return sheet
+
+    except Exception as e:
+        st.error(f"❌ Google Sheets setup failed: {str(e)}")
+        return None
 # Google Sheets setup for deployment
 
 def setup_google_sheets():
@@ -484,4 +504,5 @@ def main():
             st.info("💡 Ready to create another prescription? Refresh the page to start over.")
 
 if __name__ == "__main__":
+
     main()
