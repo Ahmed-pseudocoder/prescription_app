@@ -11,6 +11,23 @@ from reportlab.pdfgen import canvas
 from PyPDF2 import PdfReader as PyPdfReader, PdfWriter as PyPdfWriter
 import io
 
+def setup_google_sheets():
+    # For Vercel deployment
+    if 'GOOGLE_CREDENTIALS_JSON' in os.environ:
+        creds_json = os.environ['GOOGLE_CREDENTIALS_JSON']
+        credentials = Credentials.from_service_account_info(json.loads(creds_json))
+    # For local development
+    else:
+        try:
+            with open('credentials.json') as f:
+                creds_json = json.load(f)
+            credentials = Credentials.from_service_account_info(creds_json)
+        except:
+            st.error("Google Sheets credentials not found")
+            return None
+    
+    return gspread.authorize(credentials)
+
 # Google Sheets setup for deployment
 
 def setup_google_sheets():
