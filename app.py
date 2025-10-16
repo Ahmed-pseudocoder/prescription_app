@@ -20,7 +20,7 @@ st.set_page_config(
 # Google Sheets setup for deployment
 def setup_google_sheets():
     try:
-        # For Streamlit Cloud - CORRECT FORMAT
+        # For Streamlit Cloud
         if 'google_sheets' in st.secrets:
             creds_dict = json.loads(st.secrets['google_sheets']['credentials_json'])
             credentials = Credentials.from_service_account_info(creds_dict)
@@ -30,7 +30,8 @@ def setup_google_sheets():
                 creds_dict = json.load(f)
             credentials = Credentials.from_service_account_info(creds_dict)
         
-        client = gspread.authorize(credentials)
+        # Use gspread with default auth (handles scopes automatically)
+        client = gspread.service_account_from_dict(creds_dict)
         
         # Test connection
         SHEET_NAME = "cosmoslim patient record"
@@ -40,11 +41,9 @@ def setup_google_sheets():
         
     except Exception as e:
         st.error(f"❌ Google Sheets setup failed: {str(e)}")
+        # Don't return None yet - let the app continue without Google Sheets
+        st.info("📝 You can still generate PDFs without Google Sheets connection")
         return None
-
-SHEET_NAME = "cosmoslim patient record"
-SHEET_URL = "https://docs.google.com/spreadsheets/d/1vT3HU5fv8LM8noNmlUkZqYbZyhG8gBWOrYx2MOm51mQ/edit#gid=0"
-
 def save_to_google_sheets(sheet, patient_data):
     """Save prescription data to Google Sheets"""
     try:
@@ -359,3 +358,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
