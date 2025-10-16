@@ -6,121 +6,10 @@ import tempfile
 import gspread
 from google.oauth2.service_account import Credentials
 import json
-from pdfrw import PdfReader, PdfWriter, PdfDict
-from reportlab.pdfgen import canvas
-from PyPDF2 import PdfReader as PyPdfReader, PdfWriter as PyPdfWriter
+from pdfrw import PdfReader, PdfWriter
 import io
 
-
-def setup_google_sheets():
-    """Initialize Google Sheets connection for both local and cloud"""
-    try:
-        # ✅ When running in Streamlit Cloud or Render
-        if "GOOGLE_CREDENTIALS" in st.secrets:
-            creds_json = st.secrets["GOOGLE_CREDENTIALS"]
-            credentials = Credentials.from_service_account_info(creds_json)
-            st.success("✅ Using Google credentials from secrets.")
-        else:
-            # ✅ Local development (use local file)
-            with open("credentials.json") as f:
-                creds_json = json.load(f)
-            credentials = Credentials.from_service_account_info(creds_json)
-            st.info("📁 Using local credentials.json")
-
-        client = gspread.authorize(credentials)
-        return client
-
-    except Exception as e:
-        st.error(f"❌ Google Sheets setup failed: {e}")
-        return None
-
-# Use this in your app
-gc = setup_google_sheets()
-
-def generate_pdf_prescription(patient_data):
-    """Generate PDF prescription and FLATTEN it to make text visible"""
-    try:
-        template_path = "templates/prescription_template.pdf"
-        
-        if not os.path.exists(template_path):
-            st.error(f"❌ PDF template not found at: {template_path}")
-            return None
-        
-        # Step 1: Fill the form fields using pdfrw
-        template = PdfReader(template_path)
-        
-        # Exact field mapping based on your debug output
-        field_mapping = {
-            '(patient_name)': patient_data['patient_name'],
-            '(age)': str(patient_data['age']),
-            '(date)': patient_data['date'],
-            '(treatment)': patient_data['treatment_type'],
-            '(follow_up)': patient_data['follow_up_date'],
-            '(instructions)': patient_data['instructions']
-        }
-        
-        st.write("### Filling PDF Fields:")
-        fields_filled = 0
-        for field in template.Root.AcroForm.Fields:
-            field_name = field.T
-            if field_name in field_mapping:
-                field.V = field_mapping[field_name]
-                fields_filled += 1
-                st.write(f"✅ Filled: '{field_name}' with '{field_mapping[field_name]}'")
-        
-        # Save filled (but not flattened) PDF temporarily
-        with tempfile.NamedTemporaryFile(delete=False, suffix='_filled.pdf') as filled_tmp:
-            filled_path = filled_tmp.name
-            PdfWriter().write(filled_path, template)
-        
-        # Step 2: FLATTEN the PDF to make text permanently visible
-        flattened_path = flatten_pdf(filled_path)
-        
-        # Clean up temporary filled PDF
-        try:
-            os.unlink(filled_path)
-        except:
-            pass
-        
-        st.success(f"✅ PDF generated and flattened! Filled {fields_filled} fields")
-        return flattened_path
-        
-    except Exception as e:
-        st.error(f"❌ PDF generation failed: {str(e)}")
-        import traceback
-        st.code(traceback.format_exc())
-        return None
-
-def flatten_pdf(input_path):
-    """Flatten PDF form fields to make text permanently visible"""
-    try:
-        # Method 1: Using PyPDF2 (simpler approach)
-        reader = PyPdfReader(input_path)
-        writer = PyPdfWriter()
-        
-        # Copy all pages
-        for page in reader.pages:
-            writer.add_page(page)
-        
-        # Flatten the form fields
-        if reader.get_fields():
-            writer.update_page_form_field_values(writer.pages[0], {})
-        
-        # Save flattened PDF
-        with tempfile.NamedTemporaryFile(delete=False, suffix='_flattened.pdf') as flattened_tmp:
-            flattened_path = flattened_tmp.name
-            with open(flattened_path, 'wb') as output_file:
-                writer.write(output_file)
-        
-        return flattened_path
-        
-    except Exception as e:
-        st.warning(f"PyPDF2 flattening failed, using alternative method: {str(e)}")
-        # If PyPDF2 fails, return the original filled PDF
-        return input_path
-
-# [Keep the main function exactly the same]
-# Page configuration
+# MUST BE FIRST - Page configuration
 st.set_page_config(
     page_title="Prescription System",
     page_icon="🏥",
@@ -128,49 +17,33 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-SHEET_NAME = "cosmoslim patient record"
-SHEET_URL = "https://docs.google.com/spreadsheets/d/1vT3HU5fv8LM8noNmlUkZqYbZyhG8gBWOrYx2MOm51mQ/edit#gid=0"
-
+# Google Sheets setup for deployment
 def setup_google_sheets():
-    """Initialize Google Sheets connection"""
     try:
-        if os.path.exists('credentials.json'):
-            client = gspread.service_account(filename='credentials.json')
-            st.success("✅ Using credentials from credentials.json file")
+        # For Streamlit Cloud - CORRECT FORMAT
+        if 'google_sheets' in st.secrets:
+            creds_dict = json.loads(st.secrets['google_sheets']['credentials_json'])
+            credentials = Credentials.from_service_account_info(creds_dict)
         else:
-            st.warning("Google Sheets credentials not found. Please upload your credentials.json file.")
-            uploaded_file = st.file_uploader("Upload credentials.json", type="json", key="creds_upload")
-            if uploaded_file is not None:
-                with open('credentials.json', 'wb') as f:
-                    f.write(uploaded_file.getvalue())
-                st.success("✅ Credentials saved successfully!")
-                st.rerun()
-            else:
-                return None
+            # For local testing
+            with open('credentials.json') as f:
+                creds_dict = json.load(f)
+            credentials = Credentials.from_service_account_info(creds_dict)
         
-        try:
-            sheet = client.open(SHEET_NAME).sheet1
-            st.success(f"✅ Connected to Google Sheet: {SHEET_NAME}")
-            
-            existing_data = sheet.get_all_records()
-            if not existing_data:
-                headers = [
-                    "Timestamp", "Patient Name", "Age", "Date", "Treatment Type", 
-                    "Session Number", "Follow-up Date", "Instructions", "Prescription ID"
-                ]
-                sheet.append_row(headers)
-                st.info("📊 Added headers to existing sheet")
-                
-        except gspread.SpreadsheetNotFound:
-            st.error(f"❌ Google Sheet '{SHEET_NAME}' not found!")
-            return None
+        client = gspread.authorize(credentials)
         
+        # Test connection
+        SHEET_NAME = "cosmoslim patient record"
+        sheet = client.open(SHEET_NAME).sheet1
+        st.success(f"✅ Connected to Google Sheet: {SHEET_NAME}")
         return sheet
-    
+        
     except Exception as e:
         st.error(f"❌ Google Sheets setup failed: {str(e)}")
-        st.info("ℹ️ You can still generate PDFs, but data won't be saved to Google Sheets.")
         return None
+
+SHEET_NAME = "cosmoslim patient record"
+SHEET_URL = "https://docs.google.com/spreadsheets/d/1vT3HU5fv8LM8noNmlUkZqYbZyhG8gBWOrYx2MOm51mQ/edit#gid=0"
 
 def save_to_google_sheets(sheet, patient_data):
     """Save prescription data to Google Sheets"""
@@ -239,9 +112,88 @@ def debug_pdf_fields():
         
     except Exception as e:
         st.error(f"❌ Cannot read PDF: {str(e)}")
-        import traceback
-        st.code(traceback.format_exc())
         return []
+
+def generate_pdf_prescription(patient_data):
+    """Generate PDF prescription by filling form fields - SIMPLIFIED VERSION"""
+    try:
+        template_path = "templates/prescription_template.pdf"
+        
+        # Check if template exists
+        if not os.path.exists(template_path):
+            st.error(f"❌ PDF template not found at: {template_path}")
+            # List files to debug
+            try:
+                st.write("Available files in templates folder:")
+                for root, dirs, files in os.walk("."):
+                    for file in files:
+                        if file.endswith('.pdf'):
+                            st.write(f"📄 {os.path.join(root, file)}")
+            except:
+                pass
+            return None
+        
+        # Read template
+        template = PdfReader(template_path)
+        
+        if not hasattr(template.Root, 'AcroForm') or not template.Root.AcroForm.Fields:
+            st.error("❌ No form fields found in PDF template!")
+            return None
+        
+        st.write("### Filling PDF Fields:")
+        
+        # Field mapping - use EXACT field names from your PDF
+        field_mapping = {
+            'patient_name': patient_data['patient_name'],
+            'age': str(patient_data['age']),
+            'date': patient_data['date'],
+            'treatment': patient_data['treatment_type'],
+            'follow_up': patient_data['follow_up_date'],
+            'instructions': patient_data['instructions']
+        }
+        
+        fields_filled = 0
+        for field in template.Root.AcroForm.Fields:
+            field_name = field.T if hasattr(field, 'T') else 'Unknown'
+            
+            # Try exact match first
+            if field_name in field_mapping:
+                field.V = field_mapping[field_name]
+                fields_filled += 1
+                st.write(f"✅ Filled: '{field_name}' with '{field_mapping[field_name]}'")
+            else:
+                # Try case-insensitive match
+                field_name_lower = field_name.lower()
+                for key, value in field_mapping.items():
+                    if key.lower() in field_name_lower or field_name_lower in key.lower():
+                        field.V = value
+                        fields_filled += 1
+                        st.write(f"✅ Filled: '{field_name}' with '{value}'")
+                        break
+                else:
+                    st.write(f"❓ No match for field: '{field_name}'")
+        
+        # Create temporary file
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+            output_path = tmp_file.name
+        
+        # Save the filled PDF
+        PdfWriter().write(output_path, template)
+        
+        st.success(f"✅ PDF generated! Filled {fields_filled} fields")
+        
+        # Important note about PDF viewers
+        st.warning("""
+        **Note for Viewing Filled PDF:**
+        - Download the PDF and open in **Adobe Acrobat Reader** for best results
+        - Some browsers don't display filled form fields properly
+        """)
+        
+        return output_path
+        
+    except Exception as e:
+        st.error(f"❌ PDF generation failed: {str(e)}")
+        return None
 
 def create_prescription_form():
     """Create the prescription input form"""
@@ -354,93 +306,6 @@ def create_prescription_form():
     
     return None
 
-def generate_pdf_prescription(patient_data):
-    """Generate PDF prescription by filling form fields"""
-    try:
-        template_path = "templates/prescription_template.pdf"
-        
-        if not os.path.exists(template_path):
-            st.error(f"❌ PDF template not found at: {template_path}")
-            return None
-        
-        # First, let's see what fields are available
-        template = PdfReader(template_path)
-        
-        if not hasattr(template.Root, 'AcroForm') or not template.Root.AcroForm.Fields:
-            st.error("❌ No form fields found in PDF template!")
-            st.info("Please ensure your PDF has fillable form fields")
-            return None
-        
-        # Show what fields we're working with
-        st.write("### Filling PDF Fields:")
-        
-        # Try different field name combinations
-        field_attempts = [
-            # Try exact field names from your PDF
-            {'patient_name': patient_data['patient_name']},
-            {'age': str(patient_data['age'])},
-            {'date': patient_data['date']},
-            {'treatment': patient_data['treatment_type']},
-            {'follow_up': patient_data['follow_up_date']},
-            {'instructions': patient_data['instructions']},
-            {'session': str(patient_data['session']) if patient_data.get('session') != "N/A" else ""},
-            
-            # Try with common variations
-            {'Patient Name': patient_data['patient_name']},
-            {'Age': str(patient_data['age'])},
-            {'Date': patient_data['date']},
-            {'Treatment': patient_data['treatment_type']},
-            {'Follow up': patient_data['follow_up_date']},
-            {'Instructions': patient_data['instructions']},
-            {'Session': str(patient_data['session']) if patient_data.get('session') != "N/A" else ""},
-        ]
-        
-        fields_filled = 0
-        for field in template.Root.AcroForm.Fields:
-            field_name = field.T if hasattr(field, 'T') else 'Unknown'
-            
-            # Try to find matching data
-            value_found = None
-            for attempt in field_attempts:
-                for key, value in attempt.items():
-                    if key.lower() in field_name.lower() or field_name.lower() in key.lower():
-                        value_found = value
-                        break
-                if value_found:
-                    break
-            
-            if value_found is not None:
-                field.V = value_found
-                fields_filled += 1
-                st.write(f"✅ Filled: '{field_name}' with '{value_found}'")
-            else:
-                st.write(f"❓ No match for field: '{field_name}'")
-        
-        # Create temporary file
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
-            output_path = tmp_file.name
-        
-        # Save the filled PDF
-        PdfWriter().write(output_path, template)
-        
-        st.success(f"✅ PDF generated! Attempted to fill {fields_filled} fields")
-        
-        # IMPORTANT: Provide instructions to view filled PDF
-        st.warning("""
-        **Important Note for Viewing Filled PDF:**
-        - Some PDF viewers (like Chrome) don't display filled form fields properly
-        - **Download the PDF and open it in Adobe Acrobat Reader** to see the filled content
-        - The data IS in the PDF, but some viewers don't render it correctly
-        """)
-        
-        return output_path
-        
-    except Exception as e:
-        st.error(f"❌ PDF generation failed: {str(e)}")
-        import traceback
-        st.code(traceback.format_exc())
-        return None
-
 def main():
     """Main application logic"""
     
@@ -484,6 +349,7 @@ def main():
                 use_container_width=True
             )
             
+            # Clean up
             try:
                 os.unlink(pdf_path)
             except:
@@ -492,6 +358,4 @@ def main():
             st.info("💡 Ready to create another prescription? Refresh the page to start over.")
 
 if __name__ == "__main__":
-
     main()
-
