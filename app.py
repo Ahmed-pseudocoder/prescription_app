@@ -11,40 +11,28 @@ from reportlab.pdfgen import canvas
 from PyPDF2 import PdfReader as PyPdfReader, PdfWriter as PyPdfWriter
 import io
 
-SHEET_NAME = "cosmoslim patient record"
 
 def setup_google_sheets():
-    """Connect to Google Sheets using credentials from Render env vars"""
+    """Initialize Google Sheets connection for both local and cloud"""
     try:
-        creds_json = os.getenv("GOOGLE_CREDENTIALS")
-        if not creds_json:
-            st.warning("⚠️ Google credentials not found in environment variables.")
-            return None
+        # ✅ When running in Streamlit Cloud or Render
+        if "GOOGLE_CREDENTIALS" in st.secrets:
+            creds_json = st.secrets["GOOGLE_CREDENTIALS"]
+            credentials = Credentials.from_service_account_info(creds_json)
+            st.success("✅ Using Google credentials from secrets.")
+        else:
+            # ✅ Local development (use local file)
+            with open("credentials.json") as f:
+                creds_json = json.load(f)
+            credentials = Credentials.from_service_account_info(creds_json)
+            st.info("📁 Using local credentials.json")
 
-        creds = json.loads(creds_json)
-        client = gspread.service_account_from_dict(creds)
-
-        sheet = client.open(SHEET_NAME).sheet1
-        st.success(f"✅ Connected to Google Sheet: {SHEET_NAME}")
-        return sheet
+        client = gspread.authorize(credentials)
+        return client
 
     except Exception as e:
-        st.error(f"❌ Google Sheets setup failed: {str(e)}")
+        st.error(f"❌ Google Sheets setup failed: {e}")
         return None
-# Google Sheets setup for deployment
-
-def setup_google_sheets():
-    try:
-        # For Streamlit Cloud
-        creds_json = st.secrets['GOOGLE_CREDENTIALS']
-        credentials = Credentials.from_service_account_info(creds_json)
-    except:
-        # For local testing
-        with open('credentials.json') as f:
-            creds_json = json.load(f)
-        credentials = Credentials.from_service_account_info(creds_json)
-    
-    return gspread.authorize(credentials)
 
 # Use this in your app
 gc = setup_google_sheets()
@@ -506,3 +494,4 @@ def main():
 if __name__ == "__main__":
 
     main()
+
