@@ -18,6 +18,7 @@ st.set_page_config(
 )
 
 # Google Sheets setup for deployment
+SHEET_URL = "https://docs.google.com/spreadsheets/d/1vT3HU5fv8LM8noNmlUkZqYbZyhG8gBWOrYx2MOm51mQ/edit#gid=0"
 def setup_google_sheets():
     try:
         # For Streamlit Cloud
@@ -358,4 +359,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
